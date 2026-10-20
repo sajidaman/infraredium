@@ -88,17 +88,28 @@ Backend tests mock IRSA and do not depend on live archive availability. The curr
 
 ### Frontend on Vercel
 
-Import this GitHub repository in Vercel, select the Next.js framework preset, and set the project root to the repository root. Configure `NEXT_PUBLIC_API_BASE_URL` to the HTTPS URL of the separately deployed backend. Deploy previews should use a staging backend URL. Do not place server-only archive configuration or credentials in `NEXT_PUBLIC_*` variables.
+1. Import this GitHub repository into Vercel, select the Next.js framework preset, and set the project root to the repository root. Use `main` as the production branch and note the Vercel production domain (and any custom domain).
+2. Add `NEXT_PUBLIC_API_BASE_URL` to the Vercel project. Set it to the Render backend's HTTPS origin for Production and Preview; use `http://localhost:8000` for Development. This value is embedded at build time, so redeploy after changing it. Use a staging backend for Preview if one is available.
+3. Do not put server-only configuration or credentials in `NEXT_PUBLIC_*` variables.
 
 ### Python backend
 
-Deploy `backend/` as a separate Python 3.11+ service. Install `backend/requirements.txt`, then run:
+The repository includes a Render Blueprint at `render.yaml`. In the Render Dashboard, choose **New > Blueprint**, connect this repository, select `main`, and review the proposed service before deploying. It installs `backend/requirements.txt`, starts FastAPI on Render's assigned `$PORT`, deploys only after GitHub checks pass, and checks `/health`. The root `.python-version` pins the backend to Python 3.11.
 
-```sh
-uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000
+During Blueprint setup, provide `CORS_ORIGINS` as a JSON array of exact frontend origins, for example `["https://your-project.vercel.app","https://your-custom-domain.example"]`. Do not include URL paths or trailing slashes. Include any Vercel Preview origin only if it should be allowed to call this backend. The Blueprint intentionally leaves this value unsynchronized so it is not committed to source control. No IRSA credentials are required.
+
+After Render creates the service, copy its assigned HTTPS origin into Vercel's `NEXT_PUBLIC_API_BASE_URL` for Production (and Preview if applicable), then deploy/redeploy Vercel so the build includes it. Confirm that the backend's `CORS_ORIGINS` includes the Vercel production/custom domain. Choose the Render compute plan in the Blueprint review; free instances may sleep and have cold starts, so review availability and pricing before using one for production.
+
+Smoke-test the deployed backend from PowerShell, replacing the origin with the actual Render URL:
+
+```powershell
+$api = "https://your-render-service.onrender.com"
+Invoke-RestMethod "$api/health"
+$search = Invoke-RestMethod "$api/api/v1/observations/search?ra=0&dec=0&radius=0.1&limit=1"
+$search | Select-Object count, limit, truncated
 ```
 
-Configure `CORS_ORIGINS` with the exact frontend origins. No archive credentials or configurable upstream URL are used. Add a platform health check for `/health`. Search is implemented; metadata retrieval, FITS cutouts, visualization, and pixel inspection remain `501`.
+`/health` should return `status: ok`. A valid search should return `count`, `limit`, `truncated`, and `results` (which may legitimately be empty). Then submit a search in the deployed Vercel UI and check the browser console/network panel for CORS or API errors. This search smoke test contacts the public IRSA service; the automated backend tests continue to use mocks. Metadata lookup, FITS cutouts, visualization, and pixel inspection remain `501`.
 
 ### GitHub
 
